@@ -64,10 +64,6 @@ class AcademoFormCreator(BaseFormCreator):
 
 MIN_TIME = datetime.timedelta(hours=24)
 
-def get_languages():
-    # For now
-    return ['en', 'fr'] # 'it', 'es']
-
 def get_laboratories():
     labs_and_identifiers  = ACADEMO.cache.get('get_laboratories',  min_time = MIN_TIME)
     if labs_and_identifiers:
@@ -202,12 +198,16 @@ class RLMS(BaseRLMS):
             raise LabNotFoundError("Laboratory not found: {}".format(laboratory_id))
 
         url = identifiers[laboratory_id]['link']
+        languages = identifiers[laboratory_id]['languages']
 
         lang = 'en'
         if 'locale' in kwargs:
             lang = kwargs['locale']
-            if lang not in get_languages():
-                lang = 'en'
+            
+            if lang not in languages:
+                lang = lang.split('_')[0]
+                if lang not in languages:
+                    lang = 'en'
 
         url = url + '?lang=' + lang
 
