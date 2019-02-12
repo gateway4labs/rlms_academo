@@ -82,7 +82,10 @@ def get_laboratories():
         # identifier: {
         #     'name': name,
         #     'link': link,
-        #     'message': (message)
+        #     'languages': ['en', 'fr']
+        #     'translations_en': {
+        #         'foo': 'bar'
+        #     }
         # }
     }
 
@@ -92,37 +95,36 @@ def get_laboratories():
             continue
         
         name = name_p.text
-        href = 'https://composer.golabz.eu/academo/' + anchor_element['href']
+        href = 'https://composer.golabz.eu/academo' + anchor_element['href']
         identifier = anchor_element['href']
-        translations = {}
 
         lab_contents_text = requests.get(href).text
         lab_contents = BeautifulSoup(lab_contents_text, 'lxml')
-        translations_js = lab_contents.find('script', src='translations.js')
-        if translations_js:
-            translations_js_data = requests.get(href.rsplit('/', 1)[0] + '/translations.js').text
+        translation_files = lab_contents.find_all('meta', { 'name': 'translations' })
 
-            if 'TRANSLATION_DATA' in translations_js_data:
-                translations_data = ast.literal_eval(translations_js_data.strip().split('=', 1)[1].strip())
-                eng_translations = translations_data.get('messages', {}).get('en', {})
-                processed_translations = {
-
-                }
-                for key, value in eng_translations.items():
-                    processed_translations[key] = {
-                        'value': value,
-                    }
-                translations = {
-                    'mails': {},
-                    'translations': {
-                        'en': processed_translations,
-                    }
-                }
+        languages = [ tf.get('lang') or 'en' for tf in translation_files ] 
+        if not languages:
+            languages = ['en']
+    
+        translations = []
+        if translation_files:
+            english_translation_files = [ tf['value'] for tf in translation_files if tf.get('value') and tf.get('lang') in (None, 'en') ]
+            if english_translation_files:
+                try:
+                    translations = (requests.get(href + english_translation_files[0]).json() or {}).get('messages') or {}
+                except:
+                    traceback.print_exc()
 
         identifiers[identifier] = {
             'name': name,
             'link': href,
-            'translations': translations,
+            'languages': languages,
+            'translations_en': { 
+                'translations': { 
+                    'en': { row['key']: {'value': row['value']} for row in translations },
+                },
+                'mails': {}
+            }
         }
 
     labs = []
@@ -136,7 +138,7 @@ def get_laboratories():
 
 FORM_CREATOR = AcademoFormCreator()
 
-CAPABILITIES = [ Capabilities.WIDGET, Capabilities.URL_FINDER, Capabilities.CHECK_URLS, Capabilities.TRANSLATIONS, ]
+CAPABILITIES = [ Capabilities.WIDGET, Capabilities.URL_FINDER, Capabilities.CHECK_URLS, Capabilities.TRANSLATIONS, Capabilities.TRANSLATION_LIST ]
 
 class RLMS(BaseRLMS):
 
@@ -158,22 +160,31 @@ class RLMS(BaseRLMS):
 
     def get_base_urls(self):
         return [ 'https://www.academo.org', 'https://academo.org', 'https://composer.golabz.eu/academo/' ]
+    
+    def get_translation_list(self, laboratory_id):
+        labs, identifiers = get_laboratories()
+        for identifier, identifier_data in identifiers.items():
+            if identifier == laboratory_id:
+                return dict(supported_languages=identifier_data['languages'])
+
+        return dict(supported_languages=[])
 
     def get_translations(self, laboratory_id):
         labs, identifiers = get_laboratories()
         for identifier, identifier_data in identifiers.items():
             if identifier == laboratory_id:
-                return identifier_data['translations']
+                return identifier_data['translations_en']
 
         return { 'translations' : {}, 'mails' : {} }
 
     def get_lab_by_url(self, url):
         laboratories, identifiers = get_laboratories()
 
-        url = url.split('?')[0]
+        parsed = urlparse.urlparse(url)
+        path = parsed.path
 
         for lab in laboratories:
-            if url.endswith(lab.laboratory_id):
+            if path.endswith(lab.laboratory_id):
                 return lab
 
         return None
@@ -198,7 +209,7 @@ class RLMS(BaseRLMS):
             if lang not in get_languages():
                 lang = 'en'
 
-        url = url.replace('LANG', lang)
+        url = url + '?lang=' + lang
 
         response = {
             'reservation_id' : url,
